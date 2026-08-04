@@ -87,6 +87,7 @@ public class Http1xServerRequest extends HttpServerRequestInternal implements io
   private MultiMap params;
   private boolean semicolonIsNormalCharInParams;
   private MultiMap headers;
+  private MultiMap trailers;
   private String absoluteURI;
 
   private HttpEventHandler eventHandler;
@@ -383,6 +384,11 @@ public class Http1xServerRequest extends HttpServerRequestInternal implements io
     return buffer -> {
       if (buffer == InboundBuffer.END_SENTINEL) {
         onEnd();
+      } else if (buffer instanceof MultiMap) {
+        // Trailers travel through the queue so they cannot be observed before the
+        // preceding data has been delivered.
+        setTrailers((MultiMap) buffer);
+        onEnd();
       } else {
         onData((Buffer) buffer);
       }
@@ -614,6 +620,13 @@ public class Http1xServerRequest extends HttpServerRequestInternal implements io
   }
 
   void handleEnd() {
+    handleEnd(null);
+  }
+
+  void handleEnd(HttpHeaders nettyTrailers) {
+    Object end = nettyTrailers != null && !nettyTrailers.isEmpty()
+      ? new HeadersAdaptor(nettyTrailers)
+      : InboundBuffer.END_SENTINEL;
     InboundBuffer<Object> queue;
     HttpEventHandler handler = null;
     synchronized (conn) {
@@ -624,10 +637,46 @@ public class Http1xServerRequest extends HttpServerRequestInternal implements io
       }
     }
     if (queue != null) {
-      queue.write(InboundBuffer.END_SENTINEL);
-    } else if (handler != null) {
-      handler.handleEnd();
+      queue.write(end);
+    } else {
+      if (end != InboundBuffer.END_SENTINEL) {
+        setTrailers((MultiMap) end);
+      }
+      if (handler != null) {
+        handler.handleEnd();
+      }
     }
+  }
+
+  private void setTrailers(MultiMap trailers) {
+    synchronized (conn) {
+      // Must not race with trailers(), where the field can escape: if the user already
+      // obtained the empty map, update it in place instead of replacing it.
+      if (this.trailers == null) {
+        this.trailers = trailers;
+      } else if (this.trailers != trailers) {
+        this.trailers.setAll(trailers);
+      }
+    }
+  }
+
+  @Override
+  public MultiMap trailers() {
+    synchronized (conn) {
+      if (trailers == null) {
+        trailers = new HeadersAdaptor(new DefaultHttpHeaders());
+      }
+      return trailers;
+    }
+  }
+
+  @Override
+  public String getTrailer(String trailerName) {
+    MultiMap trailers;
+    synchronized (conn) {
+      trailers = this.trailers;
+    }
+    return trailers != null ? trailers.get(trailerName) : null;
   }
 
   private HttpEventHandler endRequest() {

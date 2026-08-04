@@ -178,6 +178,29 @@ public interface HttpServerRequest extends ReadStream<Buffer> {
   HttpServerResponse response();
 
   /**
+   * Return the first trailer value with the specified name
+   * <p>
+   * Trailers are only available after the request has been fully received, i.e. after the
+   * {@link #endHandler(Handler) end handler} has been called.
+   *
+   * @param trailerName  the trailer name
+   * @return the trailer value
+   */
+  @Nullable String getTrailer(String trailerName);
+
+  /**
+   * Return the trailers.
+   * <p>
+   * Trailers are only available after the request has been fully received, i.e. after the
+   * {@link #endHandler(Handler) end handler} has been called. Before that, and for requests
+   * that carry no trailers, the returned map is empty.
+   *
+   * @return the trailers
+   */
+  @CacheReturn
+  MultiMap trailers();
+
+  /**
    * @return the headers in the request.
    */
   @CacheReturn

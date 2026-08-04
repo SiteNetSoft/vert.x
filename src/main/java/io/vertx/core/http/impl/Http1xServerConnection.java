@@ -201,18 +201,21 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     Buffer buffer = Buffer.buffer(VertxHandler.safeBuffer(content.content()));
     Http1xServerRequest request = requestInProgress;
     request.context.execute(buffer, request::handleContent);
-    //TODO chunk trailers
     if (content instanceof LastHttpContent) {
-      onEnd();
+      onEnd(((LastHttpContent) content).trailingHeaders());
     }
   }
 
   private void onEnd() {
+    onEnd(null);
+  }
+
+  private void onEnd(HttpHeaders trailers) {
     boolean close;
     Http1xServerRequest request = requestInProgress;
     requestInProgress = null;
     close = !keepAlive && responseInProgress == null;
-    request.context.execute(request, Http1xServerRequest::handleEnd);
+    request.context.execute(request, req -> req.handleEnd(trailers));
     if (close) {
       flushAndClose();
     }

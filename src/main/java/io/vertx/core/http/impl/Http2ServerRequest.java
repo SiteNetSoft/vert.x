@@ -27,6 +27,7 @@ import io.vertx.core.http.Cookie;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.*;
+import io.vertx.core.http.impl.headers.HeadersAdaptor;
 import io.vertx.core.http.impl.headers.Http2HeadersAdaptor;
 import io.vertx.core.impl.ContextInternal;
 import io.vertx.core.impl.logging.Logger;
@@ -54,6 +55,7 @@ public class Http2ServerRequest extends HttpServerRequestInternal implements Htt
   protected final Http2ServerResponse response;
   private final String serverOrigin;
   private final MultiMap headersMap;
+  private MultiMap trailers;
 
   // Accessed on context thread
   private Charset paramsCharset = StandardCharsets.UTF_8;
@@ -153,6 +155,12 @@ public class Http2ServerRequest extends HttpServerRequestInternal implements Htt
   public void handleEnd(MultiMap trailers) {
     HttpEventHandler handler;
     synchronized (stream.conn) {
+      // Must not race with trailers(), where the field can escape.
+      if (this.trailers == null) {
+        this.trailers = trailers;
+      } else if (this.trailers != trailers) {
+        this.trailers.setAll(trailers);
+      }
       ended = true;
       if (postRequestDecoder != null) {
         try {
@@ -349,6 +357,25 @@ public class Http2ServerRequest extends HttpServerRequestInternal implements Htt
   @Override
   public MultiMap headers() {
     return headersMap;
+  }
+
+  @Override
+  public MultiMap trailers() {
+    synchronized (stream.conn) {
+      if (trailers == null) {
+        trailers = new HeadersAdaptor(new DefaultHttpHeaders());
+      }
+      return trailers;
+    }
+  }
+
+  @Override
+  public String getTrailer(String trailerName) {
+    MultiMap trailers;
+    synchronized (stream.conn) {
+      trailers = this.trailers;
+    }
+    return trailers != null ? trailers.get(trailerName) : null;
   }
 
   @Override
